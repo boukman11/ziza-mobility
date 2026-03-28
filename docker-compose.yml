@@ -1,0 +1,179 @@
+services:
+  db:
+    image: postgis/postgis:16-3.4
+    environment:
+      POSTGRES_USER: ziza
+      POSTGRES_PASSWORD: ziza
+      POSTGRES_DB: ziza
+    ports:
+    - 5432:5432
+    volumes:
+    - db_data:/var/lib/postgresql/data
+    healthcheck:
+      test:
+      - CMD-SHELL
+      - pg_isready -U ziza -d ziza
+      interval: 2s
+      timeout: 3s
+      retries: 30
+  keycloak:
+    image: quay.io/keycloak/keycloak:25.0
+    command:
+    - start-dev
+    - --import-realm
+    environment:
+      KC_HTTP_ENABLED: 'true'
+      KC_HOSTNAME: localhost
+      KC_HOSTNAME_PORT: '8080'
+      KC_HOSTNAME_STRICT: 'false'
+      KC_HOSTNAME_STRICT_HTTPS: 'false'
+      KC_PROXY: edge
+      KEYCLOAK_ADMIN: admin
+      KEYCLOAK_ADMIN_PASSWORD: admin
+    ports:
+    - 8080:8080
+    volumes:
+    - ./infra/local/keycloak/realm-ziza.json:/opt/keycloak/data/import/realm-ziza.json:ro
+  adminer:
+    image: adminer:4
+    ports:
+    - 8081:8080
+    depends_on:
+    - db
+  api:
+    build: ./apps/api
+    restart: unless-stopped
+    environment:
+      DATABASE_URL: postgresql+psycopg://ziza:ziza@db:5432/ziza
+      CUSTOMER_AUD: customer-api
+      DRIVER_AUD: driver-api
+      ADMIN_AUD: admin-api
+      BASE_FARE: '3.0'
+      PER_KM: '1.6'
+      PER_MIN: '0.3'
+      AVG_SPEED_KMH: '30'
+      CURRENCY: USD
+      PLATFORM_FEE_PCT: '0.2'
+      RL_WINDOW_SEC: '60'
+      RL_MAX_REQ: '180'
+      OIDC_ISSUER_PUBLIC: http://localhost:8080/realms/ziza
+      OIDC_ISSUER_INTERNAL: http://keycloak:8080/realms/ziza
+      OIDC_JWKS_URL: http://keycloak:8080/realms/ziza/protocol/openid-connect/certs
+      OIDC_ALLOWED_ISSUERS: http://localhost:8080/realms/ziza,http://keycloak:8080/realms/ziza
+      KEYCLOAK_ADMIN_BASE_URL: http://keycloak:8080
+      KEYCLOAK_REALM: ziza
+      KEYCLOAK_ADMIN_REALM: master
+      KEYCLOAK_ADMIN_CLIENT_ID: admin-cli
+      KEYCLOAK_ADMIN_USER: admin
+      KEYCLOAK_ADMIN_PASS: admin
+      CORS_ALLOW_ORIGINS: http://localhost:3000,http://localhost:3001,http://localhost:3002
+      RL_BUCKETS: admin_sensitive=30:60,auth=60:60
+    ports:
+    - 8000:8000
+    healthcheck:
+      test:
+      - CMD-SHELL
+      - python -c "import urllib.request; urllib.request.urlopen('http://localhost:8000/health',
+        timeout=2).read()"
+      interval: 5s
+      timeout: 3s
+      retries: 30
+    depends_on:
+      db:
+        condition: service_healthy
+      keycloak:
+        condition: service_started
+  worker:
+    build: ./apps/api
+    restart: unless-stopped
+    environment:
+      DATABASE_URL: postgresql+psycopg://ziza:ziza@db:5432/ziza
+      WORKER_POLL_SEC: '2.0'
+      WORKER_MAX_JOBS: '50'
+      WORKER_MAX_ATTEMPTS: '5'
+    depends_on:
+      db:
+        condition: service_healthy
+      api:
+        condition: service_healthy
+    command:
+    - bash
+    - -lc
+    - python wait_for_db.py && python worker.py
+  web-customer:
+    build:
+      context: .
+      dockerfile: apps/web-customer/Dockerfile
+    ports:
+    - 3000:3000
+    environment:
+      VITE_API_BASE: http://localhost:8000
+      VITE_KEYCLOAK_URL: http://localhost:8080
+      VITE_KEYCLOAK_REALM: ziza
+      VITE_KEYCLOAK_CLIENT_ID: ziza-customer
+    command:
+    - npm
+    - run
+    - dev
+    - --
+    - --host
+    - 0.0.0.0
+    - --port
+    - '3000'
+    depends_on:
+      api:
+        condition: service_started
+      keycloak:
+        condition: service_started
+  web-driver:
+    build:
+      context: .
+      dockerfile: apps/web-driver/Dockerfile
+    ports:
+    - 3001:3001
+    environment:
+      VITE_API_BASE: http://localhost:8000
+      VITE_KEYCLOAK_URL: http://localhost:8080
+      VITE_KEYCLOAK_REALM: ziza
+      VITE_KEYCLOAK_CLIENT_ID: ziza-driver
+    command:
+    - npm
+    - run
+    - dev
+    - --
+    - --host
+    - 0.0.0.0
+    - --port
+    - '3001'
+    depends_on:
+      api:
+        condition: service_started
+      keycloak:
+        condition: service_started
+  web-admin:
+    build:
+      context: .
+      dockerfile: apps/web-admin/Dockerfile
+    ports:
+    - 3002:3002
+    environment:
+      VITE_API_BASE: http://localhost:8000
+      VITE_KEYCLOAK_URL: http://localhost:8080
+      VITE_KEYCLOAK_REALM: ziza
+      VITE_KEYCLOAK_CLIENT_ID: ziza-admin
+    command:
+    - npm
+    - run
+    - dev
+    - --
+    - --host
+    - 0.0.0.0
+    - --port
+    - '3002'
+    depends_on:
+      api:
+        condition: service_started
+      keycloak:
+        condition: service_started
+volumes:
+  db_data: null

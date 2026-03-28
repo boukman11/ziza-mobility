@@ -1,0 +1,7 @@
+openapi: 3.0.3
+info:
+  title: Ziza Core API (Local Sprint 47)
+  version: 4.7.0
+  description: |
+    Sprint 47: Realtime-lite V1 (frontend polling). No API contract change.
+paths: {}
