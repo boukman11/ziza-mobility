@@ -5,7 +5,6 @@
 - Cause racine: appel à `enqueue_email(...)` inexistant dans `notify_user`, déclenchant une exception après l'acceptation du trajet.
 
 ## Correctif technique
-- Durcissement supplémentaire: `driver_accept` utilise désormais `safe_notify_user(...)` (best-effort) pour éviter qu'un souci de notification casse l'API d'acceptation.
 - Ajout de la fonction `enqueue_email(...)` dans `apps/api/main.py`.
 - Le helper met en file l'email dans `email_outbox` et protège le flux API via `try/except` + `rollback`.
 - Résultat: l'acceptation de trajet ne casse plus le flux Mission côté driver.
