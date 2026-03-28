@@ -1346,39 +1346,6 @@ def system_readiness(db: Session = Depends(get_db)):
     """Public readiness probe used for Cloud Run staging health automation."""
     return system_readiness_snapshot(db)
 
-
-
-@app.get("/v1/system/onboarding/checklist")
-def onboarding_checklist(role: str = Query("customer", pattern="^(customer|driver|admin)$")):
-    """Sprint 59: simple onboarding checklist for role-based guided flows."""
-    common = [
-        "Complete profile information",
-        "Read safety and privacy notice",
-        "Enable in-app notifications",
-    ]
-    role_steps = {
-        "customer": [
-            "Save pickup favorites",
-            "Run first ride estimate",
-            "Validate payment method",
-        ],
-        "driver": [
-            "Upload driver documents",
-            "Set availability to online",
-            "Accept first mission",
-        ],
-        "admin": [
-            "Review pending driver applications",
-            "Check system status dashboard",
-            "Run first analytics export",
-        ],
-    }
-    return {
-        "role": role,
-        "sprint": 59,
-        "items": common + role_steps[role],
-        "generated_at": datetime.utcnow().isoformat() + "Z",
-    }
 @app.get("/v1/admin/system/status", dependencies=[Depends(limiter("admin_sensitive"))])
 def admin_system_status(claims=Depends(admin_auth), db: Session = Depends(get_db)):
     admin_u = upsert_user(db, claims)
