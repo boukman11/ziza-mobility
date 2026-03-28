@@ -4,7 +4,7 @@ import asyncio
 from datetime import datetime, timedelta
 from typing import Optional, Dict, Any
 
-from fastapi import FastAPI, Depends, Header, HTTPException, Query, Request, Response, Body
+from fastapi import FastAPI, Depends, Header, HTTPException, Query, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from fastapi.exceptions import RequestValidationError
@@ -198,30 +198,6 @@ def set_user_prefs(db: Session, user_id, prefs: dict):
         pref.updated_at = datetime.utcnow()
     db.add(pref); db.commit()
 
-
-
-def enqueue_email(db: Session, user: User, subject: str, body: str):
-    """Queue an email notification without breaking request flows on failure."""
-    if not user or not user.email:
-        return None
-    try:
-        out = EmailOutbox(
-            user_id=user.id,
-            to_email=user.email,
-            subject=subject,
-            body=body,
-            status=EmailStatus.PENDING,
-            attempts=0,
-            next_attempt_at=datetime.utcnow(),
-            created_at=datetime.utcnow(),
-        )
-        db.add(out)
-        db.commit()
-        return out
-    except Exception:
-        db.rollback()
-        logger.exception("enqueue_email_failed user_id=%s", getattr(user, "id", None))
-        return None
 def notify_user(db: Session, user_id, notif_type: str, title: str, body: str, meta: dict | None = None):
     prefs = get_user_prefs(db, user_id)
     if prefs.get(notif_type) is False:
@@ -1370,77 +1346,6 @@ def system_readiness(db: Session = Depends(get_db)):
     """Public readiness probe used for Cloud Run staging health automation."""
     return system_readiness_snapshot(db)
 
-
-
-
-
-@app.get("/v1/user/accessibility", dependencies=[Depends(limiter("prefs"))])
-def get_accessibility_preferences(claims=Depends(any_user_auth), db: Session = Depends(get_db)):
-    """Sprint 60: role-agnostic accessibility preferences for responsive UX."""
-    u = upsert_user(db, claims)
-    prefs = get_user_prefs(db, u.id)
-    accessibility = prefs.get("accessibility") or {
-        "highContrast": False,
-        "reducedMotion": False,
-        "fontScale": 1.0,
-    }
-    return {"userId": str(u.id), "accessibility": accessibility}
-
-
-@app.put("/v1/user/accessibility", dependencies=[Depends(limiter("prefs"))])
-def set_accessibility_preferences(
-    payload: dict = Body(default={}),
-    claims=Depends(any_user_auth),
-    db: Session = Depends(get_db),
-):
-    """Sprint 60: update accessibility preferences used by web applications."""
-    u = upsert_user(db, claims)
-    current = get_user_prefs(db, u.id)
-    current_accessibility = current.get("accessibility") or {}
-
-    high_contrast = bool(payload.get("highContrast", current_accessibility.get("highContrast", False)))
-    reduced_motion = bool(payload.get("reducedMotion", current_accessibility.get("reducedMotion", False)))
-    font_scale = float(payload.get("fontScale", current_accessibility.get("fontScale", 1.0)))
-    font_scale = max(0.8, min(1.6, font_scale))
-
-    current["accessibility"] = {
-        "highContrast": high_contrast,
-        "reducedMotion": reduced_motion,
-        "fontScale": font_scale,
-    }
-    set_user_prefs(db, u.id, current)
-    return {"ok": True, "accessibility": current["accessibility"]}
-@app.get("/v1/system/onboarding/checklist")
-def onboarding_checklist(role: str = Query("customer", pattern="^(customer|driver|admin)$")):
-    """Sprint 59: simple onboarding checklist for role-based guided flows."""
-    common = [
-        "Complete profile information",
-        "Read safety and privacy notice",
-        "Enable in-app notifications",
-    ]
-    role_steps = {
-        "customer": [
-            "Save pickup favorites",
-            "Run first ride estimate",
-            "Validate payment method",
-        ],
-        "driver": [
-            "Upload driver documents",
-            "Set availability to online",
-            "Accept first mission",
-        ],
-        "admin": [
-            "Review pending driver applications",
-            "Check system status dashboard",
-            "Run first analytics export",
-        ],
-    }
-    return {
-        "role": role,
-        "sprint": 59,
-        "items": common + role_steps[role],
-        "generated_at": datetime.utcnow().isoformat() + "Z",
-    }
 @app.get("/v1/admin/system/status", dependencies=[Depends(limiter("admin_sensitive"))])
 def admin_system_status(claims=Depends(admin_auth), db: Session = Depends(get_db)):
     admin_u = upsert_user(db, claims)
